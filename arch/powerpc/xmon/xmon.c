@@ -740,7 +740,7 @@ irqreturn_t xmon_irq(int irq, void *d)
 	unsigned long flags;
 	local_irq_save(flags);
 	printf("Keyboard interrupt\n");
-	debugger(get_irq_regs());
+	xmon(get_irq_regs());
 	local_irq_restore(flags);
 	return IRQ_HANDLED;
 }
