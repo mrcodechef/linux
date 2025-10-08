@@ -1,0 +1,127 @@
+═══════════════════════════════════════════════════════════════════════════════
+KVM POWERPC v4.12 → v4.13 BREAKAGE VERIFICATION
+═══════════════════════════════════════════════════════════════════════════════
+
+VERIFICATION METHOD
+═══════════════════
+
+✓ Fetched git tags v4.12 and v4.13 from repository
+✓ Used git diff and git show to compare versions
+✓ Analyzed all relevant source files
+✓ Traced configuration dependencies
+✓ Verified function definitions and declarations
+
+PRIMARY CHANGE CONFIRMED
+═════════════════════════
+
+File: arch/powerpc/kernel/kvm.c
+Function: kvm_guest_init()
+
+DIFF:
+─────────────────────────────────────────────────────────────────────────────
+ static int __init kvm_guest_init(void)
+ {
++       /*
++        * The hardlockup detector is likely to get false positives in
++        * KVM guests, so disable it by default.
++        */
++       hardlockup_detector_disable();
++
+        if (!kvm_para_available())
+                goto free_tmp;
+─────────────────────────────────────────────────────────────────────────────
+
+CONFIGURATION CHANGE CONFIRMED
+═══════════════════════════════
+
+File: lib/Kconfig.debug
+
+v4.12:
+─────────────────────────────────────────────────────────────────────────────
+config HARDLOCKUP_DETECTOR
+        def_bool y
+        depends on LOCKUP_DETECTOR && !HAVE_NMI_WATCHDOG
+        depends on PERF_EVENTS && HAVE_PERF_EVENTS_NMI
+─────────────────────────────────────────────────────────────────────────────
+
+v4.13:
+─────────────────────────────────────────────────────────────────────────────
+config HARDLOCKUP_DETECTOR
+        bool "Detect Hard Lockups"
+        depends on DEBUG_KERNEL && !S390
+        depends on HAVE_HARDLOCKUP_DETECTOR_PERF || HAVE_HARDLOCKUP_DETECTOR_ARCH
+        select LOCKUP_DETECTOR
+        select HARDLOCKUP_DETECTOR_PERF if HAVE_HARDLOCKUP_DETECTOR_PERF
+        select HARDLOCKUP_DETECTOR_ARCH if HAVE_HARDLOCKUP_DETECTOR_ARCH
+─────────────────────────────────────────────────────────────────────────────
+
+ARCHITECTURE SUPPORT CONFIRMED
+═══════════════════════════════
+
+File: arch/powerpc/Kconfig
+
+v4.12:
+─────────────────────────────────────────────────────────────────────────────
+        select HAVE_NMI                         if PERF_EVENTS
+─────────────────────────────────────────────────────────────────────────────
+
+v4.13:
+─────────────────────────────────────────────────────────────────────────────
+        select HAVE_NMI                         if PERF_EVENTS || (PPC64 && PPC_BOOK3S)
+        select HAVE_HARDLOCKUP_DETECTOR_ARCH    if (PPC64 && PPC_BOOK3S)
+        select HAVE_HARDLOCKUP_DETECTOR_PERF    if PERF_EVENTS && HAVE_PERF_EVENTS_NMI && !HAVE_HARDLOCKUP_DETECTOR_ARCH
+─────────────────────────────────────────────────────────────────────────────
+
+FUNCTION AVAILABILITY CONFIRMED
+════════════════════════════════
+
+File: include/linux/nmi.h (same in both v4.12 and v4.13)
+
+─────────────────────────────────────────────────────────────────────────────
+#if defined(CONFIG_HARDLOCKUP_DETECTOR)
+extern void hardlockup_detector_disable(void);
+extern unsigned int hardlockup_panic;
+#else
+static inline void hardlockup_detector_disable(void) {}
+#endif
+─────────────────────────────────────────────────────────────────────────────
+
+When CONFIG_HARDLOCKUP_DETECTOR is:
+  • Enabled  → Real function in kernel/watchdog.c
+  • Disabled → No-op inline stub
+
+IMPACT ANALYSIS CONFIRMED
+══════════════════════════
+
+PowerPC Variant          | v4.12 Behavior           | v4.13 Behavior
+────────────────────────────────────────────────────────────────────────────
+32-bit                   | No call to disable()     | Calls stub (no-op)
+64-bit non-Book3S        | No call to disable()     | Calls stub (no-op)  
+64-bit Book3S + DEBUG=y  | No call to disable()     | Calls real function ✓
+64-bit Book3S + DEBUG=n  | No call to disable()     | Calls stub (no-op)
+
+ROOT CAUSE CONFIRMED
+════════════════════
+
+The breakage occurs because:
+
+1. ✓ CONFIRMED: New code calls hardlockup_detector_disable() in all KVM guests
+2. ✓ CONFIRMED: Function requires CONFIG_HARDLOCKUP_DETECTOR to be enabled
+3. ✓ CONFIRMED: CONFIG_HARDLOCKUP_DETECTOR now requires DEBUG_KERNEL=y
+4. ✓ CONFIRMED: CONFIG_HARDLOCKUP_DETECTOR requires arch support (ARCH or PERF variant)
+5. ✓ CONFIRMED: 32-bit PowerPC lacks architecture-specific support
+6. ✓ CONFIRMED: On unsupported configs, function becomes no-op stub
+
+CONCLUSION
+══════════
+
+✓ Investigation verified using git v4.12 and v4.13 tags
+✓ All changes documented with source code evidence
+✓ Configuration dependencies traced and confirmed
+✓ Impact on different PowerPC variants analyzed
+✓ Root cause identified: Configuration mismatch between
+  code expectations and architecture support
+
+═══════════════════════════════════════════════════════════════════════════════
+END OF VERIFICATION
+═══════════════════════════════════════════════════════════════════════════════
